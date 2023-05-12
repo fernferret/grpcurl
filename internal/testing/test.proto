@@ -175,4 +175,5 @@ service TestService {
 service UnimplementedService {
   // A call that no server should implement
   rpc UnimplementedCall(Empty) returns (Empty);
+  rpc UnimplementedStream(Empty) returns (stream Empty);
 }

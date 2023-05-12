@@ -440,6 +440,7 @@ var TestService_ServiceDesc = grpc.ServiceDesc{
 type UnimplementedServiceClient interface {
 	// A call that no server should implement
 	UnimplementedCall(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
+	UnimplementedStream(ctx context.Context, in *Empty, opts ...grpc.CallOption) (UnimplementedService_UnimplementedStreamClient, error)
 }
 
 type unimplementedServiceClient struct {
@@ -459,12 +460,45 @@ func (c *unimplementedServiceClient) UnimplementedCall(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *unimplementedServiceClient) UnimplementedStream(ctx context.Context, in *Empty, opts ...grpc.CallOption) (UnimplementedService_UnimplementedStreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &UnimplementedService_ServiceDesc.Streams[0], "/testing.UnimplementedService/UnimplementedStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &unimplementedServiceUnimplementedStreamClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type UnimplementedService_UnimplementedStreamClient interface {
+	Recv() (*Empty, error)
+	grpc.ClientStream
+}
+
+type unimplementedServiceUnimplementedStreamClient struct {
+	grpc.ClientStream
+}
+
+func (x *unimplementedServiceUnimplementedStreamClient) Recv() (*Empty, error) {
+	m := new(Empty)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // UnimplementedServiceServer is the server API for UnimplementedService service.
 // All implementations must embed UnimplementedUnimplementedServiceServer
 // for forward compatibility
 type UnimplementedServiceServer interface {
 	// A call that no server should implement
 	UnimplementedCall(context.Context, *Empty) (*Empty, error)
+	UnimplementedStream(*Empty, UnimplementedService_UnimplementedStreamServer) error
 	mustEmbedUnimplementedUnimplementedServiceServer()
 }
 
@@ -474,6 +508,9 @@ type UnimplementedUnimplementedServiceServer struct {
 
 func (UnimplementedUnimplementedServiceServer) UnimplementedCall(context.Context, *Empty) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UnimplementedCall not implemented")
+}
+func (UnimplementedUnimplementedServiceServer) UnimplementedStream(*Empty, UnimplementedService_UnimplementedStreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method UnimplementedStream not implemented")
 }
 func (UnimplementedUnimplementedServiceServer) mustEmbedUnimplementedUnimplementedServiceServer() {}
 
@@ -506,6 +543,27 @@ func _UnimplementedService_UnimplementedCall_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UnimplementedService_UnimplementedStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(Empty)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(UnimplementedServiceServer).UnimplementedStream(m, &unimplementedServiceUnimplementedStreamServer{stream})
+}
+
+type UnimplementedService_UnimplementedStreamServer interface {
+	Send(*Empty) error
+	grpc.ServerStream
+}
+
+type unimplementedServiceUnimplementedStreamServer struct {
+	grpc.ServerStream
+}
+
+func (x *unimplementedServiceUnimplementedStreamServer) Send(m *Empty) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // UnimplementedService_ServiceDesc is the grpc.ServiceDesc for UnimplementedService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -518,6 +576,12 @@ var UnimplementedService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _UnimplementedService_UnimplementedCall_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "UnimplementedStream",
+			Handler:       _UnimplementedService_UnimplementedStream_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "test.proto",
 }

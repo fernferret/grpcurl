@@ -228,7 +228,7 @@ func doTestListMethods(t *testing.T, source DescriptorSource, includeReflection 
 		if err != nil {
 			t.Fatalf("failed to list methods for ServerReflection: %v", err)
 		}
-		expected = []string{"testing.UnimplementedService.UnimplementedCall"}
+		expected = []string{"testing.UnimplementedService.UnimplementedCall", "testing.UnimplementedService.UnimplementedStream"}
 	}
 	if !reflect.DeepEqual(expected, names) {
 		t.Errorf("ListMethods returned wrong results: wanted %v, got %v", expected, names)
@@ -470,6 +470,56 @@ func getCC(includeRefl bool) *grpc.ClientConn {
 	} else {
 		return ccNoReflect
 	}
+}
+
+func TestUnimplementedUnary(t *testing.T) {
+	for _, ds := range descSources {
+		t.Run(ds.name, func(t *testing.T) {
+			doTestUnimplementedUnary(t, getCC(ds.includeRefl), ds.source)
+		})
+	}
+}
+
+func doTestUnimplementedUnary(t *testing.T, cc *grpc.ClientConn, source DescriptorSource) {
+	req := &grpcurl_testing.Empty{}
+	payload, err := (&jsonpb.Marshaler{}).MarshalToString(req)
+	if err != nil {
+		t.Fatalf("failed to construct request: %v", err)
+	}
+	// Success
+	h := &handler{reqMessages: []string{payload}}
+	// err = InvokeRpc(context.Background(), source, cc, "testing.UnimplementedService/UnimplementedCall", makeHeaders(codes.OK), h, h.getRequestData)
+	err = InvokeRpc(context.Background(), source, cc, "testing.UnimplementedService/UnimplementedCall", makeHeaders(codes.Unimplemented), h, h.getRequestData)
+	if err != nil {
+		t.Fatalf("unexpected error during RPC: %v", err)
+	}
+
+	h.checkUnimplemented(t, "testing.UnimplementedService.UnimplementedCall", codes.Unimplemented)
+}
+
+func TestUnimplementedStream(t *testing.T) {
+	for _, ds := range descSources {
+		t.Run(ds.name, func(t *testing.T) {
+			doTestUnimplementedStream(t, getCC(ds.includeRefl), ds.source)
+		})
+	}
+}
+
+// err = InvokeRpc(context.Background(), source, cc, "testing.UnimplementedService/UnimplementedStream", makeHeaders(codes.OK), h, h.getRequestData)
+func doTestUnimplementedStream(t *testing.T, cc *grpc.ClientConn, source DescriptorSource) {
+	req := &grpcurl_testing.Empty{}
+	payload, err := (&jsonpb.Marshaler{}).MarshalToString(req)
+	if err != nil {
+		t.Fatalf("failed to construct request: %v", err)
+	}
+
+	// Success
+	h := &handler{reqMessages: []string{payload}}
+	err = InvokeRpc(context.Background(), source, cc, "testing.UnimplementedService/UnimplementedStream", makeHeaders(codes.Unimplemented), h, h.getRequestData)
+	if err != nil {
+		t.Fatalf("unexpected error during RPC: %v", err)
+	}
+	h.check(t, "testing.UnimplementedService.UnimplementedStream", codes.Unimplemented, 1, 5)
 }
 
 func TestUnary(t *testing.T) {
@@ -786,6 +836,39 @@ func (h *handler) OnReceiveTrailers(stat *status.Status, md metadata.MD) {
 	h.respTrailersCount++
 	h.respTrailers = md
 	h.respStatus = stat
+}
+
+func (h *handler) checkUnimplemented(t *testing.T, expectedMethod string, expectedCode codes.Code) bool {
+	// verify a few things were only ever called once
+	if h.methodCount != 1 {
+		t.Errorf("expected grpcurl to invoke OnResolveMethod once; was %d", h.methodCount)
+	}
+	if h.reqHeadersCount != 1 {
+		t.Errorf("expected grpcurl to invoke OnSendHeaders once; was %d", h.reqHeadersCount)
+	}
+	if h.reqHeadersCount != 1 {
+		t.Errorf("expected grpcurl to invoke OnSendHeaders once; was %d", h.reqHeadersCount)
+	}
+	if h.respHeadersCount != 1 {
+		t.Errorf("expected grpcurl to invoke OnReceiveHeaders once; was %d", h.respHeadersCount)
+	}
+	if h.respTrailersCount != 1 {
+		t.Errorf("expected grpcurl to invoke OnReceiveTrailers once; was %d", h.respTrailersCount)
+	}
+
+	// check other stuff against given expectations
+	if h.method.GetFullyQualifiedName() != expectedMethod {
+		t.Errorf("wrong method: expecting %v, got %v", expectedMethod, h.method.GetFullyQualifiedName())
+	}
+	if h.respStatus.Code() != expectedCode {
+		t.Errorf("wrong code: expecting %v, got %v", expectedCode, h.respStatus.Code())
+	}
+
+	// TODO: I don't believe Unimplemented methods return headers, since the call
+	// fails before they can, should we check for the absence of them?
+
+	// Unimplemented methods should always return 0 messages
+	return len(h.respMessages) == 0
 }
 
 func (h *handler) check(t *testing.T, expectedMethod string, expectedCode codes.Code, expectedRequestQueries, expectedResponses int) bool {
