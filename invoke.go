@@ -264,23 +264,6 @@ func invokeServerStream(ctx context.Context, stub grpcdynamic.Stub, md *desc.Met
 	// Now we can actually invoke the RPC!
 	str, err := stub.InvokeRpcServerStream(ctx, md, req)
 
-	if respHeaders, err := str.Header(); err == nil {
-		handler.OnReceiveHeaders(respHeaders)
-	}
-
-	// Download each response message
-	for err == nil {
-		var resp proto.Message
-		resp, err = str.RecvMsg()
-		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			break
-		}
-		handler.OnReceiveResponse(resp)
-	}
-
 	stat, ok := status.FromError(err)
 	if !ok {
 		// Error codes sent from the server will get printed differently below.
@@ -288,7 +271,29 @@ func invokeServerStream(ctx context.Context, stub grpcdynamic.Stub, md *desc.Met
 		return fmt.Errorf("grpc call for %q failed: %v", md.GetFullyQualifiedName(), err)
 	}
 
-	handler.OnReceiveTrailers(stat, str.Trailer())
+	var trailer metadata.MD
+
+	if str != nil {
+		if respHeaders, err := str.Header(); err == nil {
+			handler.OnReceiveHeaders(respHeaders)
+		}
+
+		// Download each response message
+		for err == nil {
+			var resp proto.Message
+			resp, err = str.RecvMsg()
+			if err != nil {
+				if err == io.EOF {
+					err = nil
+				}
+				break
+			}
+			handler.OnReceiveResponse(resp)
+		}
+		trailer = str.Trailer()
+	}
+
+	handler.OnReceiveTrailers(stat, trailer)
 
 	return nil
 }
